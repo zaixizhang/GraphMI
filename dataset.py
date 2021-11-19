@@ -58,7 +58,7 @@ class Dataset():
         self.require_lcc = True if setting == 'nettack' else False
         self.adj, self.features, self.labels = self.load_data()
 
-        self.random_adj = self.random_matrix(self.adj)
+        self.init_adj = self.init_matrix(self.adj)
         self.idx_train, self.idx_val, self.idx_test = self.get_train_val_test()
         if self.require_mask:
             self.get_mask()
@@ -373,7 +373,7 @@ class Dataset():
         onehot_mx = eye[labels]
         return onehot_mx
 
-    def random_matrix(self, adj):
+    def init_matrix(self, adj):
         n = adj.shape[0]
         result = np.zeros((n, n))
 

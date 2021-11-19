@@ -13,9 +13,7 @@ from base_attack import BaseAttack
 class PGDAttack(BaseAttack):
 
     def __init__(self, model=None, embedding=None, nnodes=None, loss_type='CE', feature_shape=None,
-                 attack_structure=True,
-                 attack_features=False, device='cpu'):
-
+                 attack_structure=True, attack_features=False, device='cpu'):
         super(PGDAttack, self).__init__(model, nnodes, attack_structure, attack_features, device)
 
         assert attack_features or attack_structure, 'attack_features or attack_structure cannot be both False'
@@ -34,7 +32,7 @@ class PGDAttack(BaseAttack):
         if attack_features:
             assert True, 'Topology Attack does not support attack feature'
 
-    def attack(self, ori_features, ori_adj, labels, idx_inversion, n_perturbations,
+    def attack(self, ori_features, ori_adj, labels, idx_attack, num_edges,
                epochs=200, sample=False, **kwargs):
 
         victim_model = self.surrogate
@@ -49,15 +47,15 @@ class PGDAttack(BaseAttack):
             adj_norm = utils.normalize_adj_tensor(modified_adj)
             output = victim_model(ori_features, adj_norm)
             if t < 50:
-                loss = self._loss(output[idx_inversion], labels[idx_inversion]) + torch.norm(self.adj_changes,
+                loss = self._loss(output[idx_attack], labels[idx_attack]) + torch.norm(self.adj_changes,
                                                                                              p=2) * 0.001
             else:
                 loss_smooth_feat = self.feature_smoothing(modified_adj, ori_features)
-                loss = self._loss(output[idx_inversion], labels[idx_inversion]) + torch.norm(self.adj_changes,
-                                                                                             p=2) * 0.001 + 1e-4 * loss_smooth_feat
+                loss = self._loss(output[idx_attack], labels[idx_attack]) + torch.norm(self.adj_changes,
+                p=2) * 0.001 + 1e-4 * loss_smooth_feat
 
-            test_acc = utils.accuracy(output[idx_inversion], labels[idx_inversion])
-            print("loss= {:.4f}".format(loss.item()), "test_accuracy= {:.4f}".format(test_acc.item()))
+            test_acc = utils.accuracy(output[idx_attack], labels[idx_attack])
+            #print("loss= {:.4f}".format(loss.item()), "test_accuracy= {:.4f}".format(test_acc.item()))
             loss_list.append(loss.item())
             adj_grad = -torch.autograd.grad(loss, self.adj_changes)[0]
 
@@ -70,12 +68,12 @@ class PGDAttack(BaseAttack):
             if t > 200:
                 self.adj_changes.data = self.SVD()
 
-            self.projection(n_perturbations)
+            self.projection(num_edges)
             self.adj_changes.data.copy_(torch.clamp(self.adj_changes.data, min=0, max=1))
-            print(self.adj_changes.sum())
+            #print(self.adj_changes.sum())
 
-        print('--modify parameters--')
-        #self.random_sample(ori_adj, ori_features, labels, idx_inversion)
+        #print('--modify parameters--')
+        #self.random_sample(ori_adj, ori_features, labels, idx_attack)
 
         em = self.embedding(ori_features, adj_norm)
         self.adj_changes.data = self.dot_product_decode(em)
@@ -117,7 +115,7 @@ class PGDAttack(BaseAttack):
         print(center[0], center[1])
         return label
 
-    def random_sample(self, ori_adj, ori_features, labels, idx_inversion):
+    def random_sample(self, ori_adj, ori_features, labels, idx_attack):
         K = 20
         best_loss = 1000
         victim_model = self.surrogate
@@ -134,9 +132,9 @@ class PGDAttack(BaseAttack):
                 adj_norm = utils.normalize_adj_tensor(modified_adj)
                 output = victim_model(ori_features, adj_norm)
                 loss_smooth_feat = self.feature_smoothing(modified_adj, ori_features)
-                loss = self._loss(output[idx_inversion], labels[idx_inversion]) + torch.norm(self.adj_changes,
+                loss = self._loss(output[idx_attack], labels[idx_attack]) + torch.norm(self.adj_changes,
                                                                                              p=2) * 0.001 + 5e-7 * loss_smooth_feat
-                test_acc = utils.accuracy(output[idx_inversion], labels[idx_inversion])
+                test_acc = utils.accuracy(output[idx_attack], labels[idx_attack])
                 print("loss= {:.4f}".format(loss.item()), "test_accuracy= {:.4f}".format(test_acc.item()))
                 if best_loss > loss:
                     best_loss = loss
@@ -177,12 +175,12 @@ class PGDAttack(BaseAttack):
         loss_smooth_feat = torch.trace(XLXT)
         return loss_smooth_feat
 
-    def projection(self, n_perturbations):
-        if torch.clamp(self.adj_changes, 0, 1).sum() > n_perturbations:
-            print('high')
+    def projection(self, num_edges):
+        if torch.clamp(self.adj_changes, 0, 1).sum() > num_edges:
+            #print('high')
             left = (self.adj_changes - 1).min()
             right = self.adj_changes.max()
-            miu = self.bisection(left, right, n_perturbations, epsilon=1e-5)
+            miu = self.bisection(left, right, num_edges, epsilon=1e-5)
             self.adj_changes.data.copy_(torch.clamp(self.adj_changes.data - miu, min=0, max=1))
         else:
             self.adj_changes.data.copy_(torch.clamp(self.adj_changes.data, min=0, max=1))
@@ -228,9 +226,9 @@ class PGDAttack(BaseAttack):
         A = torch.zeros(Z.size()).to(self.device)
         return torch.where(Z > 0.9, Z, A)
 
-    def bisection(self, a, b, n_perturbations, epsilon):
+    def bisection(self, a, b, num_edges, epsilon):
         def func(x):
-            return torch.clamp(self.adj_changes - x, 0, 1).sum() - n_perturbations
+            return torch.clamp(self.adj_changes - x, 0, 1).sum() - num_edges
 
         miu = a
         while ((b - a) >= epsilon):
